@@ -1,2 +1,1 @@
-# stockmarketAPI
-# SekuraAIWebsite
+# www_sekura_ai
