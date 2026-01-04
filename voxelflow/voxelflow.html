@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxelFlow - 3D Audio Visualizer</title>
+    
+    <!-- 
+    ═══════════════════════════════════════════════════════════════════════
+    EXTERNAL DEPENDENCIES
+    ═══════════════════════════════════════════════════════════════════════
+    
+    Three.js (r128) - 3D rendering library
+    - Purpose: Render 3D graphics using WebGL
+    - Why CDN: No build tools needed, single-file architecture
+    - r128: Stable version with all features we need
+    -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- 
+    ═══════════════════════════════════════════════════════════════════════
+    FONTS
+    ═══════════════════════════════════════════════════════════════════════
+    
+    Google Fonts - Retro-futuristic typography
+    - Orbitron: Geometric display font (headers)
+    - Share Tech Mono: Monospace font (time display, code-like aesthetic)
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    
+    <style>
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        CSS CUSTOM PROPERTIES (Variables)
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Centralized color theme for consistency
+        - Makes it easy to change colors globally
+        - Neon colors create retro-futuristic aesthetic
+        - Dark backgrounds provide contrast
+        */
+        :root {
+            --neon-cyan: #00fff2;      /* Primary accent - electric, technological */
+            --neon-pink: #ff006e;      /* Secondary accent - energy, warmth */
+            --neon-purple: #8b5cf6;    /* Tertiary accent - mystery, depth */
+            --dark-bg: #0a0e27;        /* Main background - deep space */
+            --darker-bg: #050714;      /* Darker variant - UI panels */
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        GLOBAL RESET & BASE STYLES
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Consistent baseline across browsers
+        - Remove default margins/padding
+        - Set box-sizing for predictable sizing
+        - Prevent overflow issues
+        */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background: linear-gradient(135deg, var(--darker-bg) 0%, var(--dark-bg) 100%);
+            color: var(--neon-cyan);
+            overflow: hidden; /* Prevent scrollbars - full viewport app */
+            height: 100vh;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        CONTAINER LAYOUT
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Create layered structure for 3D canvas + UI overlay
+        
+        Architecture:
+        - #container: Full viewport wrapper
+        - #canvas-container: Three.js renders here (background layer)
+        - #ui-overlay: UI elements (foreground layer, absolute positioned)
+        
+        Why absolute positioning?
+        - UI floats above 3D scene
+        - Doesn't affect canvas dimensions
+        - Pointer events can pass through
+        */
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1; /* Behind UI overlay */
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10; /* In front of canvas */
+            pointer-events: none; /* Let clicks pass through to canvas */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        /* Re-enable pointer events only on interactive elements */
+        #ui-overlay > * {
+            pointer-events: auto;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        HEADER STYLING
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Branded title with neon glow effect
+        
+        Text-shadow technique:
+        - Multiple shadows create layered glow
+        - Progressively larger blur radius
+        - Same color = unified glow effect
+        */
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 4rem;
+            font-weight: 900;
+            background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple), var(--neon-pink));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 
+                0 0 10px rgba(0, 255, 242, 0.5),
+                0 0 20px rgba(0, 255, 242, 0.3),
+                0 0 30px rgba(0, 255, 242, 0.2);
+            animation: pulse 3s ease-in-out infinite; /* Subtle breathing effect */
+        }
+
+        /* 
+        Keyframe animation: Pulse effect
+        - Creates breathing/glowing animation
+        - Opacity variation for subtle effect
+        */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+
+        .subtitle {
+            font-size: 1rem;
+            color: var(--neon-purple);
+            margin-top: 0.5rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        INSTRUCTIONS & CONTROLS PANEL
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Glass-morphism effect UI panels
+        
+        Backdrop-filter technique:
+        - Blurs content behind the panel
+        - Creates "frosted glass" effect
+        - Modern CSS feature (check browser support)
+        
+        Border/shadow technique:
+        - Border: subtle outline glow
+        - Box-shadow: multiple layers for depth
+        */
+        #instructions, #controls {
+            background: rgba(10, 14, 39, 0.7); /* Semi-transparent background */
+            backdrop-filter: blur(10px); /* Blur effect (glass morphism) */
+            -webkit-backdrop-filter: blur(10px); /* Safari support */
+            border: 1px solid rgba(0, 255, 242, 0.3);
+            border-radius: 15px;
+            padding: 2rem;
+            max-width: 600px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.3),
+                0 0 20px rgba(0, 255, 242, 0.1);
+        }
+
+        #instructions {
+            font-size: 1.2rem;
+            line-height: 1.8;
+        }
+
+        #controls {
+            margin-top: 1rem;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        FILE UPLOAD - DROP ZONE
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Drag-and-drop upload area with visual feedback
+        
+        States:
+        1. Default: Dashed border, prompt text
+        2. Hover: Solid border, brighter glow
+        3. Drag over: Pulsing animation, highlighted state
+        
+        Why drag-and-drop?
+        - Modern, intuitive UX
+        - Faster than file picker
+        - Visual feedback enhances usability
+        */
+        #drop-zone {
+            border: 3px dashed var(--neon-cyan);
+            border-radius: 10px;
+            padding: 3rem 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #drop-zone:hover {
+            border-style: solid;
+            box-shadow: 0 0 30px rgba(0, 255, 242, 0.4);
+            transform: translateY(-2px);
+        }
+
+        #drop-zone.drag-over {
+            background: rgba(0, 255, 242, 0.1);
+            border-color: var(--neon-pink);
+            box-shadow: 0 0 40px rgba(255, 0, 110, 0.6);
+            animation: pulse-border 1s infinite;
+        }
+
+        @keyframes pulse-border {
+            0%, 100% { border-color: var(--neon-pink); }
+            50% { border-color: var(--neon-cyan); }
+        }
+
+        #drop-zone p {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+        }
+
+        .file-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        PLAYBACK CONTROLS
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Media player controls (play, pause, stop, seek)
+        
+        Hidden by default:
+        - Only appears after file is loaded
+        - JavaScript toggles display: none → block
+        */
+        #playback {
+            display: none; /* Hidden until audio loaded */
+            margin-top: 1rem;
+        }
+
+        #track-info {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: var(--neon-purple);
+            font-weight: bold;
+        }
+
+        #playback-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        BUTTON STYLING
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Interactive buttons with neon aesthetic
+        
+        Hover effects:
+        - Background color change
+        - Glow intensity increase
+        - Subtle scale transform (feels responsive)
+        
+        Active state:
+        - Scale down (pressed feeling)
+        - Immediate tactile feedback
+        */
+        button {
+            background: transparent;
+            border: 2px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+            padding: 0.8rem 2rem;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1rem;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        button:hover {
+            background: var(--neon-cyan);
+            color: var(--dark-bg);
+            box-shadow: 0 0 20px var(--neon-cyan);
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        PROGRESS BAR
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Visual progress indicator + seekable timeline
+        
+        Two-layer structure:
+        1. Background track (full width)
+        2. Filled bar (width = percentage played)
+        
+        Clickable for seeking:
+        - JavaScript calculates click position
+        - Converts to time percentage
+        - Updates audio.currentTime
+        */
+        #progress-container {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            cursor: pointer;
+            margin-bottom: 1rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #progress-bar {
+            height: 100%;
+            width: 0%; /* Updated by JavaScript based on playback */
+            background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink));
+            border-radius: 10px;
+            transition: width 0.1s linear;
+            box-shadow: 0 0 10px var(--neon-cyan);
+        }
+
+        #time-display {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: var(--neon-purple);
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        UTILITY CLASSES
+        ═══════════════════════════════════════════════════════════════════════
+        */
+        .hidden {
+            display: none;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════════
+        RESPONSIVE DESIGN
+        ═══════════════════════════════════════════════════════════════════════
+        
+        Purpose: Adapt to smaller screens
+        - Reduce font sizes
+        - Adjust padding
+        - Stack buttons vertically if needed
+        */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            #instructions, #controls {
+                padding: 1.5rem;
+                font-size: 0.9rem;
+            }
+
+            #playback-buttons {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 
+    ═══════════════════════════════════════════════════════════════════════
+    HTML STRUCTURE
+    ═══════════════════════════════════════════════════════════════════════
+    
+    Architecture:
+    - Container: Full viewport wrapper
+    - Canvas Container: Three.js WebGL canvas inserted here
+    - UI Overlay: Floating UI elements positioned above canvas
+    -->
+    
+    <div id="container">
+        <!-- 
+        Canvas Container
+        - Three.js will append <canvas> element here via JavaScript
+        - renderer.domElement is the canvas
+        -->
+        <div id="canvas-container"></div>
+        
+        <!-- 
+        UI Overlay
+        - Positioned absolutely over the canvas
+        - Contains all user-facing controls
+        -->
+        <div id="ui-overlay">
+            <!-- Header -->
+            <header>
+                <h1>VOXELFLOW</h1>
+                <p class="subtitle">3D Audio Visualizer</p>
+            </header>
+
+            <!-- Initial Instructions (hidden after file upload) -->
+            <div id="instructions">
+                <p>🎵 Upload an MP3 file to transform your music into a mesmerizing 3D visualization</p>
+                <p style="font-size: 0.9rem; margin-top: 1rem; opacity: 0.7;">
+                    Each voxel represents a frequency band, pulsing and glowing in sync with your music
+                </p>
+            </div>
+
+            <!-- Controls Panel -->
+            <div id="controls">
+                <!-- File Upload Zone -->
+                <div id="drop-zone">
+                    <span class="file-icon">📁</span>
+                    <p>Drag & Drop your MP3 file here</p>
+                    <p style="font-size: 0.9rem; opacity: 0.7;">or click to browse</p>
+                    <!-- Hidden file input (triggered by click on drop-zone) -->
+                    <input type="file" id="file-input" accept="audio/mp3" style="display: none;">
+                </div>
+
+                <!-- Playback Controls (appears after file loaded) -->
+                <div id="playback">
+                    <div id="track-info">Now Playing: <span id="track-name">Unknown Track</span></div>
+                    
+                    <!-- Play/Pause/Stop Buttons -->
+                    <div id="playback-buttons">
+                        <button id="play-btn">▶ Play</button>
+                        <button id="pause-btn" style="display: none;">⏸ Pause</button>
+                        <button id="stop-btn">⏹ Stop</button>
+                    </div>
+
+                    <!-- Progress Bar (seekable) -->
+                    <div id="progress-container">
+                        <div id="progress-bar"></div>
+                    </div>
+
+                    <!-- Time Display (current / duration) -->
+                    <div id="time-display">
+                        <span id="current-time">0:00</span>
+                        <span id="duration">0:00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 
+    Hidden Audio Element
+    - HTML5 audio player (not visible to user)
+    - Controlled programmatically via JavaScript
+    - Connected to Web Audio API for frequency analysis
+    -->
+    <audio id="audio-element"></audio>
+
+    <!-- 
+    ═══════════════════════════════════════════════════════════════════════
+    JAVASCRIPT - APPLICATION LOGIC
+    ═══════════════════════════════════════════════════════════════════════
+    -->
+    <script>
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        GLOBAL STATE VARIABLES
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Store references to objects used throughout the app
+        
+        Three.js variables:
+        - scene: The 3D world
+        - camera: Viewpoint into the world
+        - renderer: Converts 3D to 2D pixels
+        - voxels: Array of 1024 cube meshes
+        
+        Web Audio API variables:
+        - audioContext: Audio processing engine
+        - analyser: Extracts frequency data
+        - audioSource: Connects HTML audio to Web Audio graph
+        - dataArray: Stores frequency values (Uint8Array)
+        
+        DOM elements:
+        - Cached for performance (avoid repeated querySelector calls)
+        */
+        
+        // Three.js objects
+        let scene, camera, renderer, voxels = [];
+        
+        // Web Audio API objects
+        let audioContext, analyser, audioSource, dataArray;
+        
+        // DOM element references
+        const audioElement = document.getElementById('audio-element');
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const instructions = document.getElementById('instructions');
+        const playbackDiv = document.getElementById('playback');
+        const playBtn = document.getElementById('play-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const progressBar = document.getElementById('progress-bar');
+        const progressContainer = document.getElementById('progress-container');
+        const currentTimeDisplay = document.getElementById('current-time');
+        const durationDisplay = document.getElementById('duration');
+        const trackName = document.getElementById('track-name');
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        INITIALIZATION - THREE.JS SETUP
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Create the 3D scene, camera, renderer, and lighting
+        
+        Three.js rendering pipeline:
+        1. Scene: Container for all 3D objects
+        2. Camera: Defines view frustum (what's visible)
+        3. Renderer: Draws scene from camera perspective
+        4. Lights: Illuminate objects (required for non-emissive materials)
+        
+        Why this camera position?
+        - FOV 75: Wide angle for immersive view
+        - Position (0, 25, 50): Elevated and back from grid
+        - lookAt (0, 5, 0): Slightly above grid center
+        
+        Why these lights?
+        - AmbientLight: Base illumination (soft, no shadows)
+        - DirectionalLight: Sunlight-like (creates definition/depth)
+        */
+        function initThreeJS() {
+            // Create scene (the 3D world container)
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050714); // Match CSS dark background
+            scene.fog = new THREE.Fog(0x050714, 30, 100); // Atmospheric depth
+
+            // Create camera (perspective projection for realistic depth)
+            // Parameters: FOV, aspect ratio, near clipping, far clipping
+            camera = new THREE.PerspectiveCamera(
+                75,                                        // Field of view (degrees)
+                window.innerWidth / window.innerHeight,   // Aspect ratio
+                0.1,                                       // Near clipping plane
+                1000                                       // Far clipping plane
+            );
+            camera.position.set(0, 25, 50); // Position camera above and behind grid
+            camera.lookAt(0, 5, 0);         // Look at point slightly above grid center
+
+            // Create renderer (WebGL context for drawing)
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,        // Smooth edges (better quality)
+                alpha: true             // Transparent background support
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight); // Match viewport
+            renderer.setPixelRatio(window.devicePixelRatio);         // Support high-DPI screens
+            
+            // Append canvas to DOM
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Add ambient light (non-directional, illuminates everything equally)
+            const ambientLight = new THREE.AmbientLight(0x404040, 1); // Dim white light
+            scene.add(ambientLight);
+
+            // Add directional light (like sunlight, has direction)
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5); // White light
+            directionalLight.position.set(10, 20, 10); // From above and side
+            scene.add(directionalLight);
+
+            // Add grid helper (retro aesthetic, shows ground plane)
+            const gridHelper = new THREE.GridHelper(60, 60, 0x00fff2, 0x00fff2);
+            gridHelper.material.opacity = 0.2;
+            gridHelper.material.transparent = true;
+            scene.add(gridHelper);
+
+            // Create the voxel grid (1024 cubes)
+            createVoxelGrid();
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        VOXEL GRID CREATION
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Generate 32x32 grid of 3D cubes (voxels)
+        
+        Key concepts:
+        
+        1. Shared Geometry:
+           - ONE BoxGeometry instance used by all 1024 voxels
+           - Saves ~1MB memory vs individual geometries
+           - WebGL only stores geometry data once
+        
+        2. Individual Materials:
+           - Each voxel needs its own material (for unique colors)
+           - MeshPhongMaterial: Reflects light (shiny, realistic)
+           - Emissive property: Self-illumination (glow effect)
+        
+        3. Grid Layout Math:
+           - gridSize = 32 (creates 32×32 = 1024 voxels)
+           - spacing = 1.5 (distance between voxel centers)
+           - Centering: Start at negative half of total width/depth
+        
+        4. Position Calculation:
+           - x = -(gridSize * spacing)/2 + (col * spacing)
+           - z = -(gridSize * spacing)/2 + (row * spacing)
+           - y = 0.5 (starting height, will animate later)
+        
+        5. Array Index:
+           - index = row * gridSize + col
+           - Maps 2D grid position to 1D array
+           - Same indexing as frequency data array
+        */
+        function createVoxelGrid() {
+            const gridSize = 32;     // 32×32 = 1024 voxels
+            const spacing = 1.5;     // Distance between voxels
+            const halfGrid = (gridSize * spacing) / 2; // For centering
+
+            // Create ONE shared geometry (memory optimization)
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+
+            // Double nested loop: rows and columns
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    // Calculate 1D array index from 2D position
+                    const index = row * gridSize + col;
+                    
+                    // Create unique material for this voxel
+                    // MeshPhongMaterial: Shiny material that reflects light
+                    const material = new THREE.MeshPhongMaterial({
+                        color: 0x00fff2,          // Starting color (cyan)
+                        emissive: 0x00fff2,       // Glow color (same as base)
+                        emissiveIntensity: 0.2,   // Glow strength
+                        transparent: true,        // Enable opacity
+                        opacity: 0.8              // Slight transparency
+                    });
+
+                    // Create mesh (geometry + material = visible object)
+                    const mesh = new THREE.Mesh(geometry, material);
+
+                    // Position the voxel in 3D space
+                    mesh.position.x = -halfGrid + (col * spacing); // Left to right
+                    mesh.position.y = 0.5;                         // Starting height
+                    mesh.position.z = -halfGrid + (row * spacing); // Front to back
+
+                    // Add to scene and store reference
+                    scene.add(mesh);
+                    voxels.push(mesh);
+                }
+            }
+
+            console.log(`✅ Created ${voxels.length} voxels`);
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        INITIALIZATION - WEB AUDIO API SETUP
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Set up audio processing pipeline for frequency extraction
+        
+        Web Audio API Architecture (node graph):
+        
+        ┌──────────────────┐
+        │  Audio File      │
+        │  (MP3 decoded)   │
+        └────────┬─────────┘
+                 ↓
+        ┌──────────────────┐
+        │ MediaElement     │ ← HTML5 <audio> element
+        │ SourceNode       │   (plays audio normally)
+        └────────┬─────────┘
+                 ↓
+        ┌──────────────────┐
+        │  AnalyserNode    │ ← Performs FFT (frequency analysis)
+        │  FFT Size: 2048  │   - Does NOT modify audio
+        └────────┬─────────┘   - Only analyzes it
+                 ↓
+        ┌──────────────────┐
+        │  Destination     │ ← Speakers/headphones
+        │  (speakers)      │
+        └──────────────────┘
+                 ↑
+                 │ (We read frequency data here via getByteFrequencyData)
+        
+        Key Concepts:
+        
+        1. AudioContext:
+           - The "audio engine" that manages all audio processing
+           - Creates and connects audio nodes
+           - Browser autoplay policy: Must resume after user interaction
+        
+        2. AnalyserNode:
+           - Performs Fast Fourier Transform (FFT)
+           - Converts time-domain signal → frequency-domain data
+           - FFT Size 2048 = 1024 frequency bins (0 Hz to ~22 kHz)
+        
+        3. MediaElementAudioSourceNode:
+           - Bridges HTML5 <audio> and Web Audio API
+           - Audio flows through: Element → Source → Analyser → Speakers
+        
+        4. getByteFrequencyData():
+           - Outputs Uint8Array with values 0-255
+           - Each index = frequency bin
+           - Index 0 = lowest freq, Index 1023 = highest freq
+        */
+        function initAudio() {
+            // Create AudioContext (audio processing engine)
+            // Note: Requires user interaction to start (browser autoplay policy)
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            // Create AnalyserNode (frequency analyzer)
+            analyser = audioContext.createAnalyser();
+            
+            // FFT (Fast Fourier Transform) configuration
+            analyser.fftSize = 2048;  // Must be power of 2 (512, 1024, 2048, 4096, etc.)
+                                       // Larger = better frequency resolution, slower
+                                       // 2048 = good balance for music visualization
+            
+            // Smoothing factor (0 to 1)
+            // Higher = smoother but less responsive
+            // Lower = more responsive but jittery
+            analyser.smoothingTimeConstant = 0.8;
+
+            // Create data array to store frequency values
+            // Size = fftSize / 2 (Nyquist frequency theorem)
+            const bufferLength = analyser.frequencyBinCount; // = 1024
+            dataArray = new Uint8Array(bufferLength);        // Values: 0-255
+
+            // Create MediaElementSource (connects <audio> to Web Audio graph)
+            audioSource = audioContext.createMediaElementSource(audioElement);
+
+            // Connect the audio graph:
+            // Audio Element → Analyser → Speakers
+            audioSource.connect(analyser);
+            analyser.connect(audioContext.destination); // destination = speakers
+
+            console.log('✅ Web Audio API initialized');
+            console.log(`   - FFT Size: ${analyser.fftSize}`);
+            console.log(`   - Frequency Bins: ${bufferLength}`);
+            console.log(`   - Voxels: ${voxels.length}`);
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        VOXEL UPDATE LOGIC - THE CORE VISUALIZATION
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Update voxel heights and colors based on audio frequencies
+        
+        This is where the magic happens! Each frame:
+        1. Read current frequency data from analyser
+        2. Map each frequency bin to corresponding voxel
+        3. Update voxel height (scale.y) based on amplitude
+        4. Update voxel color based on frequency index and amplitude
+        
+        Key Concepts:
+        
+        1. getByteFrequencyData():
+           - Fills dataArray with current frequency amplitudes
+           - Values: 0 (silent) to 255 (max amplitude)
+           - Updates in real-time as audio plays
+        
+        2. 1:1 Mapping:
+           - dataArray[0] → voxel[0] (lowest frequency)
+           - dataArray[511] → voxel[511] (mid frequency)
+           - dataArray[1023] → voxel[1023] (highest frequency)
+        
+        3. Height Calculation:
+           - Normalize: value / 255 = 0.0 to 1.0
+           - Scale: 0.5 + (normalized * 15) = 0.5 to 15.5 units
+           - Lerp: Smooth interpolation prevents jarring jumps
+        
+        4. Color Calculation:
+           - HSL color space: Hue, Saturation, Lightness
+           - Hue: 0 (red) → 0.6 (pink/purple) based on frequency index
+           - Saturation: 1.0 (full saturation, vivid colors)
+           - Lightness: 0.5 to 0.8 based on amplitude (brighter = louder)
+        
+        5. Lerp (Linear Interpolation):
+           - Smooths rapid changes
+           - Formula: current + (target - current) * factor
+           - Factor 0.3 = 30% of difference per frame
+           - Creates fluid, organic motion
+        */
+        function updateVoxels() {
+            // Read current frequency data into dataArray
+            // This updates the array with latest audio analysis
+            analyser.getByteFrequencyData(dataArray);
+
+            // Iterate through all 1024 voxels
+            for (let i = 0; i < voxels.length; i++) {
+                const voxel = voxels[i];
+                
+                // Get frequency amplitude for this voxel's frequency band
+                const value = dataArray[i];      // Raw value: 0-255
+                const normalized = value / 255;  // Normalized: 0.0-1.0
+
+                // Calculate target height based on amplitude
+                const targetHeight = 0.5 + (normalized * 15);
+                
+                // Smooth interpolation (lerp) for fluid animation
+                // Without lerp: Voxels would jump instantly (jarring)
+                // With lerp: Voxels smoothly transition (organic)
+                voxel.scale.y = voxel.scale.y + (targetHeight - voxel.scale.y) * 0.3;
+
+                // Reposition voxel so bottom stays at y=0
+                // As scale.y increases, mesh grows from center
+                // We adjust position.y to keep bottom anchored
+                voxel.position.y = voxel.scale.y / 2;
+
+                // Calculate color based on frequency index and amplitude
+                // Hue: Maps voxel index to color spectrum
+                //   - Low index (bass) = cyan/green (0.0-0.2 hue)
+                //   - Mid index = yellow (0.3-0.4 hue)
+                //   - High index (treble) = pink/purple (0.5-0.6 hue)
+                const hue = (i / voxels.length) * 0.6;
+                
+                // Lightness: Brighter when louder
+                const lightness = 0.5 + (normalized * 0.3);
+                
+                // Create color using HSL (Hue, Saturation, Lightness)
+                const color = new THREE.Color().setHSL(
+                    hue,        // Hue: 0.0-0.6 (cyan → pink)
+                    1.0,        // Saturation: 1.0 (full saturation)
+                    lightness   // Lightness: 0.5-0.8 (darker to brighter)
+                );
+
+                // Apply color to material
+                voxel.material.color = color;
+                voxel.material.emissive = color; // Glow color matches base color
+                
+                // Emissive intensity: Glow stronger when louder
+                voxel.material.emissiveIntensity = normalized * 0.5;
+            }
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        CAMERA ANIMATION - AUTO-ORBIT
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Smoothly rotate camera around the voxel grid
+        
+        Circular Motion Math:
+        - x = radius * sin(angle)
+        - z = radius * cos(angle)
+        - Forms a circle in the XZ plane
+        
+        Why this approach?
+        - No OrbitControls dependency (keeping it simple)
+        - Provides dynamic viewing angles automatically
+        - User can focus on visuals without manual control
+        
+        Parameters:
+        - Radius: 40 units (distance from center)
+        - Height: 25 units (elevated view)
+        - Speed: 0.0001 (very slow, cinematic)
+        - Target: (0, 5, 0) (slightly above grid)
+        */
+        function updateCamera() {
+            // Time-based rotation (milliseconds * speed factor)
+            const time = Date.now() * 0.0001; // Slow rotation
+
+            // Circular orbit in XZ plane
+            camera.position.x = Math.sin(time) * 40; // Horizontal (side to side)
+            camera.position.z = Math.cos(time) * 40; // Depth (front to back)
+            camera.position.y = 25;                  // Constant height (elevated)
+
+            // Always look at point above grid center
+            camera.lookAt(0, 5, 0);
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        ANIMATION LOOP - THE HEARTBEAT
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Continuous update and render cycle (60fps)
+        
+        requestAnimationFrame (rAF) explained:
+        - Browser API for smooth animations
+        - Calls function before next repaint (typically 60fps)
+        - Automatically pauses when tab not visible (saves CPU/battery)
+        - Syncs with monitor refresh rate (no tearing)
+        - Better than setInterval/setTimeout for animations
+        
+        Animation Loop Flow:
+        1. Schedule next frame (recursive call)
+        2. Update voxels based on audio
+        3. Update camera position
+        4. Render scene from camera perspective
+        
+        Why this order?
+        - rAF first: Ensures smooth recursion
+        - Update first: Modify 3D objects
+        - Render last: Draw updated scene
+        */
+        function animate() {
+            // Schedule next frame (creates infinite loop)
+            requestAnimationFrame(animate);
+
+            // Update voxels if audio is playing
+            if (!audioElement.paused) {
+                updateVoxels();
+            }
+
+            // Orbit camera around scene
+            updateCamera();
+
+            // Render the scene from camera's perspective
+            renderer.render(scene, camera);
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        FILE UPLOAD HANDLING
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Load MP3 file into audio element and initialize audio system
+        
+        File API Flow:
+        1. User selects/drops file
+        2. JavaScript reads File object
+        3. Create Object URL (blob:// URL pointing to file in memory)
+        4. Set as audio element source
+        5. Audio element loads and decodes MP3
+        
+        Why Object URL?
+        - File lives in user's filesystem (browser can't directly access)
+        - createObjectURL creates temporary memory reference
+        - Browser can stream from this URL
+        - Must revoke URL after use (free memory)
+        
+        First-time initialization:
+        - Web Audio API only initialized once (first file load)
+        - AudioContext reused for subsequent files
+        */
+        function handleFile(file) {
+            // Validate file type
+            if (!file || !file.type.includes('audio')) {
+                alert('Please upload an MP3 audio file');
+                return;
+            }
+
+            // Initialize Web Audio API on first file load
+            if (!audioContext) {
+                initAudio();
+            }
+
+            // Resume AudioContext (browser autoplay policy requirement)
+            // User interaction required to start audio
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            // Create Object URL from File object
+            // This creates a temporary blob:// URL pointing to the file
+            const fileURL = URL.createObjectURL(file);
+            
+            // Set audio source
+            audioElement.src = fileURL;
+            
+            // Load audio (triggers 'loadedmetadata' event when ready)
+            audioElement.load();
+
+            // Update UI: Hide instructions, show playback controls
+            instructions.style.display = 'none';
+            playbackDiv.style.display = 'block';
+            trackName.textContent = file.name;
+
+            console.log(`✅ Loaded: ${file.name}`);
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        TIME FORMATTING UTILITY
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Convert seconds to MM:SS format for display
+        
+        Math breakdown:
+        - Minutes: Math.floor(seconds / 60)
+        - Remaining seconds: Math.floor(seconds % 60)
+        - Padding: .toString().padStart(2, '0') ensures "05" not "5"
+        
+        Example:
+        - 125 seconds → "2:05"
+        - 70 seconds → "1:10"
+        - 5 seconds → "0:05"
+        */
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        EVENT LISTENERS - USER INTERACTIONS
+        ═══════════════════════════════════════════════════════════════════
+        */
+
+        // ─────────────────────────────────────────────────────────────────
+        // FILE UPLOAD EVENTS
+        // ─────────────────────────────────────────────────────────────────
+
+        // Click on drop zone → trigger hidden file input
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // File input change → handle selected file
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        // Drag over drop zone → add visual feedback
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault(); // Required for drop to work
+            dropZone.classList.add('drag-over');
+        });
+
+        // Drag leave drop zone → remove visual feedback
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        // Drop file on drop zone → handle dropped file
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); // Prevent browser from opening file
+            dropZone.classList.remove('drag-over');
+            
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+
+        // ─────────────────────────────────────────────────────────────────
+        // AUDIO ELEMENT EVENTS
+        // ─────────────────────────────────────────────────────────────────
+
+        // Audio metadata loaded (duration available)
+        audioElement.addEventListener('loadedmetadata', () => {
+            durationDisplay.textContent = formatTime(audioElement.duration);
+        });
+
+        // Audio time update (fires continuously during playback)
+        audioElement.addEventListener('timeupdate', () => {
+            // Update time display
+            currentTimeDisplay.textContent = formatTime(audioElement.currentTime);
+            
+            // Update progress bar width
+            const progress = (audioElement.currentTime / audioElement.duration) * 100;
+            progressBar.style.width = `${progress}%`;
+        });
+
+        // Audio ended (reached end of file)
+        audioElement.addEventListener('ended', () => {
+            // Reset UI to play button
+            playBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
+        });
+
+        // ─────────────────────────────────────────────────────────────────
+        // PLAYBACK CONTROL EVENTS
+        // ─────────────────────────────────────────────────────────────────
+
+        // Play button click
+        playBtn.addEventListener('click', () => {
+            audioElement.play();
+            playBtn.style.display = 'none';
+            pauseBtn.style.display = 'inline-block';
+        });
+
+        // Pause button click
+        pauseBtn.addEventListener('click', () => {
+            audioElement.pause();
+            pauseBtn.style.display = 'none';
+            playBtn.style.display = 'inline-block';
+        });
+
+        // Stop button click
+        stopBtn.addEventListener('click', () => {
+            audioElement.pause();
+            audioElement.currentTime = 0; // Reset to beginning
+            playBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
+        });
+
+        // Progress bar click (seeking)
+        progressContainer.addEventListener('click', (e) => {
+            // Calculate click position as percentage of container width
+            const rect = progressContainer.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const percentage = clickX / rect.width;
+            
+            // Seek to that position in audio
+            audioElement.currentTime = percentage * audioElement.duration;
+        });
+
+        // ─────────────────────────────────────────────────────────────────
+        // WINDOW RESIZE EVENT
+        // ─────────────────────────────────────────────────────────────────
+
+        // Handle window resize (keep canvas fullscreen)
+        window.addEventListener('resize', () => {
+            // Update camera aspect ratio
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix(); // Required after aspect change
+            
+            // Update renderer size
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        /* 
+        ═══════════════════════════════════════════════════════════════════
+        APPLICATION STARTUP
+        ═══════════════════════════════════════════════════════════════════
+        
+        Purpose: Initialize and start the application
+        
+        Execution order:
+        1. Initialize Three.js (scene, camera, renderer, voxels)
+        2. Start animation loop (begins rendering)
+        3. Wait for user to upload file
+        4. Initialize Web Audio API when file loaded
+        
+        Note: Web Audio API NOT initialized here because:
+        - Browser autoplay policy requires user interaction
+        - Initialized in handleFile() after user uploads file
+        */
+        
+        // Initialize Three.js scene
+        initThreeJS();
+        
+        // Start animation loop (runs continuously)
+        animate();
+        
+        console.log('🎵 VoxelFlow initialized and ready!');
+        console.log('   Upload an MP3 file to begin visualization');
+    </script>
+</body>
+</html>
+
