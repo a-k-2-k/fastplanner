@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+        compiler: [g++-11, clang++-14]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          libeigen3-dev \
+          libgtest-dev \
+          libbenchmark-dev
+    
+    - name: Configure CMake
+      env:
+        CXX: ${{ matrix.compiler }}
+      run: |
+        cmake -B ${{github.workspace}}/build \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+    
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{ matrix.build_type }} -j$(nproc)
+    
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C ${{ matrix.build_type }} --output-on-failure
+    
+    - name: Run Examples
+      working-directory: ${{github.workspace}}/build
+      run: |
+        ./examples/demo_state_trajectory
+        ./examples/demo_collision_checking
+
+  build-macos:
+    runs-on: macos-latest
+    
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        brew install cmake eigen googletest google-benchmark
+    
+    - name: Configure CMake
+      run: |
+        cmake -B ${{github.workspace}}/build \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+    
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{ matrix.build_type }} -j$(sysctl -n hw.ncpu)
+    
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C ${{ matrix.build_type }} --output-on-failure
+    
+    - name: Run Examples
+      working-directory: ${{github.workspace}}/build
+      run: |
+        ./examples/demo_state_trajectory
+        ./examples/demo_collision_checking
+
+  code-quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install clang-format
+      run: sudo apt-get install -y clang-format-14
+    
+    - name: Check code formatting
+      run: |
+        find include src tests examples -name "*.cpp" -o -name "*.hpp" | \
+          xargs clang-format-14 --dry-run --Werror
+
+  coverage:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          libeigen3-dev \
+          libgtest-dev \
+          gcov \
+          lcov
+    
+    - name: Configure CMake with coverage
+      run: |
+        cmake -B ${{github.workspace}}/build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_CXX_FLAGS="--coverage"
+    
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build -j$(nproc)
+    
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest --output-on-failure
+    
+    - name: Generate coverage report
+      working-directory: ${{github.workspace}}/build
+      run: |
+        lcov --capture --directory . --output-file coverage.info
+        lcov --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
+        lcov --list coverage.info
+
