@@ -65,3 +65,16 @@ proj4*/*.txt
 # Please don't unless you know what you're doing
 *.iml
 **/.idea/**
+
+
+# Added by cargo
+
+/target
+
+# Credentials and key material -- never stage these from $HOME
+.ssh/
+.aws/
+.claude.json
+.claude/
+*.pem
+*.key
